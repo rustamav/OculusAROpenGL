@@ -1,6 +1,8 @@
 #define GLEW_STATIC
 #include "GL/glew.h"
 #include <ovrvision.h>        //Ovrvision SDK
+#include <string>
+#include <vector>
 #include <fstream>
 // Uncomment your platform
 #define OVR_OS_WIN32
@@ -13,6 +15,180 @@
 
 using namespace OVR;
 int processer_quality = OVR::OV_PSQT_HIGH;
+
+
+GLuint loadBMP_custom(const char * imagepath){
+
+	printf("Reading image %s\n", imagepath);
+
+	// Data read from the header of the BMP file
+	unsigned char header[54];
+	unsigned int dataPos;
+	unsigned int imageSize;
+	unsigned int width, height;
+	// Actual RGB data
+	unsigned char * data;
+
+	// Open the file
+	FILE * file = fopen(imagepath, "rb");
+	if (!file)							    { printf("%s could not be opened. Are you in the right directory ? Don't forget to read the FAQ !\n", imagepath); getchar(); return 0; }
+
+	// Read the header, i.e. the 54 first bytes
+
+	// If less than 54 bytes are read, problem
+	if (fread(header, 1, 54, file) != 54){
+		printf("Not a correct BMP file\n");
+		return 0;
+	}
+	// A BMP files always begins with "BM"
+	if (header[0] != 'B' || header[1] != 'M'){
+		printf("Not a correct BMP file\n");
+		return 0;
+	}
+	// Make sure this is a 24bpp file
+	if (*(int*)&(header[0x1E]) != 0)         { printf("Not a correct BMP file\n");    return 0; }
+	if (*(int*)&(header[0x1C]) != 24)         { printf("Not a correct BMP file\n");    return 0; }
+
+	// Read the information about the image
+	dataPos = *(int*)&(header[0x0A]);
+	imageSize = *(int*)&(header[0x22]);
+	width = *(int*)&(header[0x12]);
+	height = *(int*)&(header[0x16]);
+
+	// Some BMP files are misformatted, guess missing information
+	if (imageSize == 0)    imageSize = width*height * 3; // 3 : one byte for each Red, Green and Blue component
+	if (dataPos == 0)      dataPos = 54; // The BMP header is done that way
+
+	// Create a buffer
+	data = new unsigned char[imageSize];
+
+	// Read the actual data from the file into the buffer
+	fread(data, 1, imageSize, file);
+
+	// Everything is in memory now, the file wan be closed
+	fclose(file);
+
+	// Create one OpenGL texture
+	GLuint textureID;
+	glGenTextures(1, &textureID);
+
+	// "Bind" the newly created texture : all future texture functions will modify this texture
+	glBindTexture(GL_TEXTURE_2D, textureID);
+
+	// Give the image to OpenGL
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_BGR, GL_UNSIGNED_BYTE, data);
+
+	// OpenGL has now copied the data. Free our own version
+	delete[] data;
+
+	// Poor filtering, or ...
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); 
+
+	// ... nice trilinear filtering.
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glGenerateMipmap(GL_TEXTURE_2D);
+
+	// Return the ID of the texture we just created
+	return textureID;
+}
+GLuint LoadShaders(const char * vertex_file_path, const char * fragment_file_path){
+
+	// Create the shaders
+	GLuint VertexShaderID = glCreateShader(GL_VERTEX_SHADER);
+	GLuint FragmentShaderID = glCreateShader(GL_FRAGMENT_SHADER);
+
+	// Read the Vertex Shader code from the file
+	std::string VertexShaderCode;
+	std::ifstream VertexShaderStream(vertex_file_path, std::ios::in);
+	if (VertexShaderStream.is_open()){
+		std::string Line = "";
+		while (getline(VertexShaderStream, Line))
+			VertexShaderCode += "\n" + Line;
+		VertexShaderStream.close();
+	}
+	else{
+		printf("Impossible to open %s. Are you in the right directory ? Don't forget to read the FAQ !\n", vertex_file_path);
+		getchar();
+		return 0;
+	}
+
+	// Read the Fragment Shader code from the file
+	std::string FragmentShaderCode;
+	std::ifstream FragmentShaderStream(fragment_file_path, std::ios::in);
+	if (FragmentShaderStream.is_open()){
+		std::string Line = "";
+		while (getline(FragmentShaderStream, Line))
+			FragmentShaderCode += "\n" + Line;
+		FragmentShaderStream.close();
+	}
+
+
+
+	GLint Result = GL_FALSE;
+	int InfoLogLength;
+
+
+
+	// Compile Vertex Shader
+	printf("Compiling shader : %s\n", vertex_file_path);
+	char const * VertexSourcePointer = VertexShaderCode.c_str();
+	glShaderSource(VertexShaderID, 1, &VertexSourcePointer, NULL);
+	glCompileShader(VertexShaderID);
+
+	// Check Vertex Shader
+	glGetShaderiv(VertexShaderID, GL_COMPILE_STATUS, &Result);
+	glGetShaderiv(VertexShaderID, GL_INFO_LOG_LENGTH, &InfoLogLength);
+	if (InfoLogLength > 0){
+		std::vector<char> VertexShaderErrorMessage(InfoLogLength + 1);
+		glGetShaderInfoLog(VertexShaderID, InfoLogLength, NULL, &VertexShaderErrorMessage[0]);
+		printf("%s\n", &VertexShaderErrorMessage[0]);
+	}
+
+
+
+	// Compile Fragment Shader
+	printf("Compiling shader : %s\n", fragment_file_path);
+	char const * FragmentSourcePointer = FragmentShaderCode.c_str();
+	glShaderSource(FragmentShaderID, 1, &FragmentSourcePointer, NULL);
+	glCompileShader(FragmentShaderID);
+
+	// Check Fragment Shader
+	glGetShaderiv(FragmentShaderID, GL_COMPILE_STATUS, &Result);
+	glGetShaderiv(FragmentShaderID, GL_INFO_LOG_LENGTH, &InfoLogLength);
+	if (InfoLogLength > 0){
+		std::vector<char> FragmentShaderErrorMessage(InfoLogLength + 1);
+		glGetShaderInfoLog(FragmentShaderID, InfoLogLength, NULL, &FragmentShaderErrorMessage[0]);
+		printf("%s\n", &FragmentShaderErrorMessage[0]);
+	}
+
+
+
+	// Link the program
+	printf("Linking program\n");
+	GLuint ProgramID = glCreateProgram();
+	glAttachShader(ProgramID, VertexShaderID);
+	glAttachShader(ProgramID, FragmentShaderID);
+	glLinkProgram(ProgramID);
+
+	// Check the program
+	glGetProgramiv(ProgramID, GL_LINK_STATUS, &Result);
+	glGetProgramiv(ProgramID, GL_INFO_LOG_LENGTH, &InfoLogLength);
+	if (InfoLogLength > 0){
+		std::vector<char> ProgramErrorMessage(InfoLogLength + 1);
+		glGetProgramInfoLog(ProgramID, InfoLogLength, NULL, &ProgramErrorMessage[0]);
+		printf("%s\n", &ProgramErrorMessage[0]);
+	}
+
+	glDeleteShader(VertexShaderID);
+	glDeleteShader(FragmentShaderID);
+
+	return ProgramID;
+}
+
 int main(int argc, char *argv[])
 {
 	SDL_Init(SDL_INIT_VIDEO);
@@ -38,17 +214,19 @@ int main(int argc, char *argv[])
 		debug = true;
 	}
 
-	
-	//g_pOvrvision = new OVR::Ovrvision();
-	//if (hmd->Type == ovrHmd_DK2) {
+
+	g_pOvrvision = new OVR::Ovrvision();
+	g_pOvrvision->Open(0, OVR::OV_CAMVGA_FULL);  //Open
+	g_pOvrvision->DefaultSetting();
+	if (hmd->Type == ovrHmd_DK2) {
 		//Rift DK2
-	//	g_pOvrvision->Open(0, OVR::OV_CAMVGA_FULL);  //Open
-	//}
-	//else {
-	//	//Rift DK1
-	//	g_pOvrvision->Open(0, OVR::OV_CAMVGA_FULL, OVR::OV_HMD_OCULUS_DK1);  //Open
-	//}
-	
+		g_pOvrvision->Open(0, OVR::OV_CAMVGA_FULL);  //Open
+	}
+	else {
+		//Rift DK1
+		g_pOvrvision->Open(0, OVR::OV_CAMVGA_FULL, OVR::OV_HMD_OCULUS_DK1);  //Open
+	}
+
 
 	// Get ovrvision image
 	//unsigned char pImageBuf[100000]; //TO_DORustam: WTF
@@ -62,8 +240,8 @@ int main(int argc, char *argv[])
 
 	//unsigned char* p2 = g_pOvrvision->GetCamImage(OVR::OV_CAMEYE_RIGHT, (OvPSQuality)processer_quality);
 	//outfile.close();
-//	delete pImageBuf;
-	
+	//	delete pImageBuf;
+
 
 	if (debug == false && hmd->HmdCaps & ovrHmdCap_ExtendDesktop)
 	{
@@ -172,7 +350,7 @@ int main(int argc, char *argv[])
 	ovrHmd_SetEnabledCaps(hmd, ovrHmdCap_LowPersistence | ovrHmdCap_DynamicPrediction);
 
 	ovrHmd_ConfigureTracking(hmd, ovrTrackingCap_Orientation | ovrTrackingCap_MagYawCorrection | ovrTrackingCap_Position, 0);
-
+	/*
 	const GLchar *vertexShaderSource[] = {
 		"#version 150\n"
 		"uniform mat4 MVPMatrix;\n"
@@ -205,31 +383,52 @@ int main(int argc, char *argv[])
 	glAttachShader(program, fragmentShader);
 	glLinkProgram(program);
 	glUseProgram(program);
-
+	*/
+	GLuint program = LoadShaders("Vertex2.shader", "Fragment2.shader");
+	glLinkProgram(program);
+	glUseProgram(program);
 	GLuint MVPMatrixLocation = glGetUniformLocation(program, "MVPMatrix");
 	GLuint positionLocation = glGetAttribLocation(program, "position");
+	GLuint uvlocation = glGetAttribLocation(program, "uvcoord");
+	GLuint TextureID = glGetUniformLocation(program, "myTextureSampler");
 
 	GLuint vertexArray;
 	glGenVertexArrays(1, &vertexArray);
 	glBindVertexArray(vertexArray);
 
 	GLfloat vertices[] = {
-		-1.0f, 1.0f, -2.0f,
-		-1.0f, -1.0f, -2.0f,
-		1.0f, 1.0f, -2.0f,
+		-1.0f, 1.0f, -1.0f,
+		-1.0f, -1.0f, -1.0f,
+		1.0f, 1.0f, -1.0f,
 
-		1.0f, -1.0f, -2.0f,
-		-1.0f, -1.0f, -2.0f,
-		1.0f, 1.0f, -2.0f
-		
+		1.0f, -1.0f, -1.0f,
+		-1.0f, -1.0f, -1.0f,
+		1.0f, 1.0f, -1.0f
+
 	};
-
 	GLuint positionBuffer;
 	glGenBuffers(1, &positionBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 	glVertexAttribPointer(positionLocation, 3, GL_FLOAT, GL_FALSE, 0, 0);
 	glEnableVertexAttribArray(positionLocation);
+
+	//========== CREATE TEXTURE ===============
+	GLfloat uvvertices[] = {
+		0.0f, 0.0f,
+		0.0f, 1.0f,
+		1.0f, 0.0f,
+
+		1.0f, 1.0f,
+		0.0f, 1.0f,
+		1.0f, 0.0f
+	};
+	GLuint uvbuffer;
+	glGenBuffers(1, &uvbuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(uvvertices), uvvertices, GL_STATIC_DRAW);
+	glVertexAttribPointer(uvlocation, 2, GL_FLOAT, GL_FALSE, 0, 0);
+	glEnableVertexAttribArray(uvlocation);
 
 	glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
 	glClearDepth(1.0f);
@@ -281,11 +480,55 @@ int main(int argc, char *argv[])
 
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+
+		// ================= CREATE TEXTURE ===========
+		// Create one OpenGL texture
+		Sleep(30);
+		g_pOvrvision->PreStoreCamData();	//renderer
+		//g_pOvrvision->GetCamImageMJPEG(pImageBuf, &pSize, OV_CAMEYE_LEFT);
+		unsigned char* data = g_pOvrvision->GetCamImage(OVR::OV_CAMEYE_LEFT, (OvPSQuality)processer_quality);
+
+		//GLuint textureCam = loadBMP_custom("test.bmp");
+		GLuint textureCam;
+		glGenTextures(1, &textureCam);
+
+		// "Bind" the newly created texture : all future texture functions will modify this texture
+		glBindTexture(GL_TEXTURE_2D, textureCam);
+
+		// Give the image to OpenGL
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 640, 480, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+
+//		delete[] data;
+
+		// ... nice trilinear filtering.
+		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glGenerateMipmap(GL_TEXTURE_2D);
+
+
+		// ========= /CREATE TEXTURE ==============
+
+
+
+		// Use our shader
+		glUseProgram(program);
+		// Bind our texture in Texture Unit 0
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, textureCam);
+		// Set our "myTextureSampler" sampler to user Texture Unit 0
+		glUniform1i(TextureID, 0);
+		// ================= CREATE TEXTURE ===========
+	
+
 		for (int eyeIndex = 0; eyeIndex < ovrEye_Count; eyeIndex++)
 		{
 			ovrEyeType eye = hmd->EyeRenderOrder[eyeIndex];
 
 			Matrix4f MVPMatrix = Matrix4f(ovrMatrix4f_Projection(eyeRenderDesc[eye].Fov, 0.01f, 10000.0f, true)) * Matrix4f(Quatf(eyeRenderPose[eye].Orientation).Inverted()) * Matrix4f::Translation(-Vector3f(eyeRenderPose[eye].Position));
+
+			MVPMatrix = OVR::Matrix4f::Identity();
 
 			glUniformMatrix4fv(MVPMatrixLocation, 1, GL_FALSE, &MVPMatrix.Transposed().M[0][0]);
 
@@ -304,8 +547,8 @@ int main(int argc, char *argv[])
 	glDeleteVertexArrays(1, &vertexArray);
 	glDeleteBuffers(1, &positionBuffer);
 
-	glDeleteShader(vertexShader);
-	glDeleteShader(fragmentShader);
+	//glDeleteShader(vertexShader);
+	//glDeleteShader(fragmentShader);
 	glDeleteProgram(program);
 
 	glDeleteFramebuffers(1, &frameBuffer);
