@@ -1,18 +1,18 @@
-#define GLEW_STATIC
+
 #include "FaceRecognition.h"
-#include "GL/glew.h"
-#include <ovrvision.h>        //Ovrvision SDK
+//#include "GL/glew.h"
+
 #include <string>
 #include <vector>
 #include <fstream>
 // Uncomment your platform
-#define OVR_OS_WIN32
+//#define OVR_OS_WIN32
 //#define OVR_OS_MAC
 //#define OVR_OS_LINUX
+#include "HMD.cpp"
+#include "CAMERA.cpp"
 
 
-#include "OVR_CAPI_GL.h"
-#include "Kernel/OVR_Math.h"
 #include "SDL.h"
 #include "SDL_syswm.h"
 
@@ -45,144 +45,10 @@ unsigned char* data[2];
 unsigned char jpgimage[100000];
 ovrFrameTiming ovrTiming;
 
-class HMD {
-private:
-	ovrHmd hmd;
-	Sizei renderTargetSize;
-	ovrRecti eyeRenderViewport[2];
-	ovrGLTexture eyeTexture[2];
-	ovrFovPort eyeFov[2];
-	ovrEyeRenderDesc eyeRenderDesc[2];
-public:
-	HMD(){}
-	~HMD(){
-		printf("~~~ HMD is deleted");
-	}
-	HMD(bool& isDebug, Uint32& flags){
-		hmd = ovrHmd_Create(0);
-		if (hmd == NULL)
-		{
-			hmd = ovrHmd_CreateDebug(ovrHmd_DK1);
 
-			isDebug = true;
-		}
 
-		Sizei recommendedTex0Size = ovrHmd_GetFovTextureSize(hmd, ovrEye_Left, hmd->DefaultEyeFov[0], 1.0f);
-		Sizei recommendedTex1Size = ovrHmd_GetFovTextureSize(hmd, ovrEye_Right, hmd->DefaultEyeFov[1], 1.0f);
-		
-		renderTargetSize.w = recommendedTex0Size.w + recommendedTex1Size.w;
-		renderTargetSize.h = max(recommendedTex0Size.h, recommendedTex1Size.h);
-
-	}
-	ovrHmd getDevice() {
-		return hmd;
-	}
-	Sizei getRenderTargetSize() {
-		return renderTargetSize;
-	}
-	Sizei getResolution() {
-		return hmd->Resolution;
-	}
-	ovrRecti* getEyeRenderViewport(){
-		return eyeRenderViewport;
-	}
-	ovrGLTexture* getEyeTexture(){
-		return eyeTexture;
-	}
-	ovrFovPort* getEyeFov(){
-		return eyeFov;
-	}
-	ovrEyeRenderDesc* getEyeRenderDesc(){
-		return eyeRenderDesc;
-	}
-	void cleanup(){
-		ovrHmd_Destroy(hmd);
-		ovr_Shutdown();
-	}
-	void createEyeTextures(){
-		// ovrFovPort eyeFov[2] = { hmd->getDevice()->DefaultEyeFov[0], hmd->getDevice()->DefaultEyeFov[1] }; //TODO:Rustam Why this work and other does not
-
-		eyeFov[0] =  hmd->DefaultEyeFov[0];
-		eyeFov[1] = hmd->DefaultEyeFov[1];
-		
-		eyeRenderViewport[0].Pos = Vector2i(0, 0);
-		eyeRenderViewport[0].Size = Sizei(getRenderTargetSize().w / 2, getRenderTargetSize().h);
-		eyeRenderViewport[1].Pos = Vector2i((getRenderTargetSize().w + 1) / 2, 0);
-		eyeRenderViewport[1].Size = eyeRenderViewport[0].Size;
-
-		
-		eyeTexture[0].OGL.Header.API = ovrRenderAPI_OpenGL;
-		eyeTexture[0].OGL.Header.TextureSize = getRenderTargetSize();
-		eyeTexture[0].OGL.Header.RenderViewport = eyeRenderViewport[0];
-		eyeTexture[0].OGL.TexId = texture;
-
-		eyeTexture[1] = eyeTexture[0];
-		eyeTexture[1].OGL.Header.RenderViewport = eyeRenderViewport[1];
-	}
-
-	void configureWindow(SDL_SysWMinfo& info){
-		ovrGLConfig cfg;
-		cfg.OGL.Header.API = ovrRenderAPI_OpenGL;
-		cfg.OGL.Header.RTSize = Sizei(getResolution().w, getResolution().h);
-		cfg.OGL.Header.Multisample = 1;
-#if defined(OVR_OS_WIN32)
-		if (!(getDevice()->HmdCaps & ovrHmdCap_ExtendDesktop))
-			ovrHmd_AttachToWindow(getDevice(), info.info.win.window, NULL, NULL);
-
-		cfg.OGL.Window = info.info.win.window;
-		cfg.OGL.DC = NULL;
-#elif defined(OVR_OS_LINUX)
-		cfg.OGL.Disp = info.info.x11.display;
-		cfg.OGL.Win = info.info.x11.window;
-#endif
-
-		
-
-		ovrHmd_ConfigureRendering(getDevice(), &cfg.Config, ovrDistortionCap_Chromatic | ovrDistortionCap_Vignette | ovrDistortionCap_TimeWarp | ovrDistortionCap_Overdrive, getEyeFov(), eyeRenderDesc);
-
-		ovrHmd_SetEnabledCaps(getDevice(), ovrHmdCap_LowPersistence | ovrHmdCap_DynamicPrediction);
-
-		ovrHmd_ConfigureTracking(getDevice(), ovrTrackingCap_Orientation | ovrTrackingCap_MagYawCorrection | ovrTrackingCap_Position, 0);
-	}
-};
-class CAMERA{
-private:
-	OVR::Ovrvision* g_pOvrvision;
-	int processer_quality;
-public:
-	CAMERA(HMD* hmd, bool isDebug) {
-		g_pOvrvision = new OVR::Ovrvision();
-		int processer_quality = OVR::OV_PSQT_HIGH;
-		if (isDebug){
-		g_pOvrvision->Open(0, OVR::OV_CAMVGA_FULL);  //Open
-		}
-		else if (hmd->getDevice()->Type == ovrHmd_DK2) {
-			//Rift DK2
-			g_pOvrvision->Open(0, OVR::OV_CAMVGA_FULL);  //Open
-		}
-		else {
-			//Rift DK1
-			g_pOvrvision->Open(0, OVR::OV_CAMVGA_FULL, OVR::OV_HMD_OCULUS_DK1);  //Open
-		}
-	}
-	OVR::Ovrvision* getDevice(){
-		return g_pOvrvision;
-		
-	}
-	void preStoreCamData() {
-		g_pOvrvision->PreStoreCamData();	//renderer
-	}
-	unsigned char* getCamImageLeft() {
-		return g_pOvrvision->GetCamImage(OVR::OV_CAMEYE_LEFT, (OvPSQuality)processer_quality);
-	}
-	unsigned char* getCamImageRight() {
-		return g_pOvrvision->GetCamImage(OVR::OV_CAMEYE_RIGHT, (OvPSQuality)processer_quality);
-	}
-	
-	
-
-};
 HMD* hmd;
+CAMERA* camera;
 int main(int argc, char *argv[])
 {
 	SDL_Init(SDL_INIT_VIDEO);
@@ -197,7 +63,7 @@ int main(int argc, char *argv[])
 	ovr_Initialize();
 	hmd = new HMD(debug, flags);
 
-	CAMERA* camera = new CAMERA(hmd, debug);
+	camera = new CAMERA(hmd, debug);
 	// Get ovrvision image
 	//unsigned char pImageBuf[100000]; //TO_DORustam: WTF
 	//int pSize = 0;
@@ -261,7 +127,7 @@ int main(int argc, char *argv[])
 	}
 
 
-	hmd->createEyeTextures();
+	hmd->createEyeTextures(texture);
 	
 
 	SDL_SysWMinfo info;
@@ -303,6 +169,7 @@ int main(int argc, char *argv[])
 	glEnableVertexAttribArray(positionLocation);
 
 	//========== CREATE TEXTURE ===============
+	/*
 	GLfloat uvvertices[] = {
 		0.0f, 0.0f,
 		0.0f, 1.0f,
@@ -311,6 +178,17 @@ int main(int argc, char *argv[])
 		1.0f, 1.0f,
 		0.0f, 1.0f,
 		1.0f, 0.0f
+	};
+	*/
+	//TODO:Rustam WHY the HACK it appeared reversed after some magic
+	GLfloat uvvertices[] = {
+		1.0f, 1.0f,
+		1.0f, 0.0f,
+		0.0f, 1.0f,
+
+		0.0f, 0.0f,
+		1.0f, 0.0f,
+		0.0f, 1.0f
 	};
 	glGenBuffers(1, &uvbuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
@@ -350,6 +228,15 @@ int main(int argc, char *argv[])
 					break;
 				}
 				break;
+			case SDL_KEYUP:
+				switch (event.key.keysym.sym)
+				{
+				case SDLK_SPACE:
+					camera->storeCamImages();
+					break;
+				default:
+					break;
+				}
 			default:
 				break;
 			}
@@ -403,7 +290,7 @@ int main(int argc, char *argv[])
 		for (int eyeIndex = 0; eyeIndex < ovrEye_Count; eyeIndex++)
 		{
 			ovrEyeType eye = hmd->getDevice()->EyeRenderOrder[eyeIndex];
-			glGenTextures(1, &textureCam);
+			//glGenTextures(1, &textureCam);
 			// "Bind" the newly created texture : all future texture functions will modify this texture
 			glBindTexture(GL_TEXTURE_2D, textureCam);
 
@@ -470,6 +357,7 @@ void cleanup() {
 	SDL_DestroyWindow(window);
 
 	hmd->cleanup();
+	//camera->cleanup();
 	
 	SDL_Quit();
 }
