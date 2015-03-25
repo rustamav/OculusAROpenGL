@@ -5,14 +5,12 @@
 #include <string>
 #include <vector>
 #include <fstream>
-// Uncomment your platform
-//#define OVR_OS_WIN32
-//#define OVR_OS_MAC
-//#define OVR_OS_LINUX
+
 #include "HMD.cpp"
 #include "CAMERA.cpp"
 
-
+#include <thread>
+#include <chrono>  
 #include "SDL.h"
 #include "SDL_syswm.h"
 
@@ -49,6 +47,7 @@ ovrFrameTiming ovrTiming;
 
 HMD* hmd;
 CAMERA* camera;
+
 int main(int argc, char *argv[])
 {
 	SDL_Init(SDL_INIT_VIDEO);
@@ -64,19 +63,7 @@ int main(int argc, char *argv[])
 	hmd = new HMD(debug, flags);
 
 	camera = new CAMERA(hmd, debug);
-	// Get ovrvision image
-	//unsigned char pImageBuf[100000]; //TO_DORustam: WTF
-	//int pSize = 0;
-	//g_pOvrvision->PreStoreCamData();	//renderer
-	//g_pOvrvision->GetCamImageMJPEG(pImageBuf, &pSize, OV_CAMEYE_LEFT);
-	//unsigned char* p = g_pOvrvision->GetCamImage(OVR::OV_CAMEYE_LEFT, (OvPSQuality)processer_quality);
-
-	//std::ofstream outfile("new.jpeg", std::ofstream::binary);
-	//outfile.write((const char*)pImageBuf, pSize);
-
-	//unsigned char* p2 = g_pOvrvision->GetCamImage(OVR::OV_CAMEYE_RIGHT, (OvPSQuality)processer_quality);
-	//outfile.close();
-	//	delete pImageBuf;
+		
 	if (debug == false && hmd->getDevice()->HmdCaps & ovrHmdCap_ExtendDesktop)
 	{
 		x = hmd->getDevice()->WindowsPos.x;
@@ -234,6 +221,11 @@ int main(int argc, char *argv[])
 				case SDLK_SPACE:
 					camera->storeCamImages();
 					break;
+				case SDLK_r:
+					camera->storeCamImage(0,"./CamData/recognize.jpeg");
+					std::thread(faceRecognition, "./CamData/recognize.jpeg" ,1).detach();
+					//std::thread(threadfunc, "hi").detach();
+					break;
 				default:
 					break;
 				}
@@ -245,14 +237,14 @@ int main(int argc, char *argv[])
 		ovrTiming = ovrHmd_BeginFrame(hmd->getDevice(), 0);
 		float curDelta = ovrTiming.DeltaSeconds;
 		
-		while (curDelta < 0.016) 
+		while (curDelta < 0.016666) 
 		{
 			Sleep(1);
 			ovrTiming = ovrHmd_BeginFrame(hmd->getDevice(), 0);
 			curDelta += ovrTiming.DeltaSeconds;
 		}
 		
-		printf("Time since last frame %2.8f\n", 1/curDelta);
+		//printf("Time since last frame %2.8f\n", 1/curDelta);
 
 		ovrVector3f hmdToEyeViewOffset[2] = { hmd->getEyeRenderDesc()[0].HmdToEyeViewOffset, hmd->getEyeRenderDesc()[1].HmdToEyeViewOffset };
 
@@ -267,30 +259,14 @@ int main(int argc, char *argv[])
 
 		// ================= CREATE TEXTURE ===========
 		// Create one OpenGL texture
-		//Sleep(30);
 		camera->getDevice()->PreStoreCamData();	//renderer
-		//g_pOvrvision->GetCamImageMJPEG(pImageBuf, &pSize, OV_CAMEYE_LEFT);
 		data[OVR::OV_CAMEYE_LEFT] = camera->getCamImageLeft();
 		data[OVR::OV_CAMEYE_RIGHT] = camera->getCamImageRight();
-		//int p = 3 * 640 * 480;
-		
-		//g_pOvrvision->GetCamImageMJPEG(jpgimage,&p ,OVR::OV_CAMEYE_LEFT);
-
-		//FILE *pa = fopen("testJPEG", "wb");
-		//FILE *pb = fopen("testRAW", "wb");
-		//fwrite(jpgimage, 1, p, pa);
-		//fwrite(data[0], 1, p, pb);
-		//fclose(pa);
-		//fclose(pb);
-		//delete jpgimage;
-		//printf("Prediction is : %d",faceRecognition("new.jpg",2));
-	
-		//GLuint textureCam = loadBMP_custom("test.bmp");
-		
+				
 		for (int eyeIndex = 0; eyeIndex < ovrEye_Count; eyeIndex++)
 		{
 			ovrEyeType eye = hmd->getDevice()->EyeRenderOrder[eyeIndex];
-			//glGenTextures(1, &textureCam);
+			//glGenTextures(1, &textureCam); //TODO:Rustam This was causing memor drain
 			// "Bind" the newly created texture : all future texture functions will modify this texture
 			glBindTexture(GL_TEXTURE_2D, textureCam);
 
@@ -334,7 +310,6 @@ int main(int argc, char *argv[])
 	}
 
 	cleanup(); //TODO:Rustam Destructors are not called?
-	//system("pause");
 	return 0;
 }
 
