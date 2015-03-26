@@ -76,6 +76,7 @@ int faceRecognition(string pathToRecognizedImage, int originalID)
 	else if (selection == 3) { model->train(images, labels); model->save("first_database.yml"); }
 	*/
 
+	model->set("threshold", 500.0);
 	int predictedLabel = model->predict(testSample);
 
 	clock_t end = clock();

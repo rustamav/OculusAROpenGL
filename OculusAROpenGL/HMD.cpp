@@ -20,12 +20,15 @@ private:
 	ovrGLTexture eyeTexture[2];
 	ovrFovPort eyeFov[2];
 	ovrEyeRenderDesc eyeRenderDesc[2];
+	ovrPosef eyeRenderPose[2];
+	ovrFrameTiming timing;
 public:
 	HMD(){}
 	~HMD(){
 		printf("~~~ HMD is deleted");
 	}
 	HMD(bool& isDebug, Uint32& flags){
+		ovr_Initialize();
 		hmd = ovrHmd_Create(0);
 		if (hmd == NULL)
 		{
@@ -40,6 +43,22 @@ public:
 		renderTargetSize.w = recommendedTex0Size.w + recommendedTex1Size.w;
 		renderTargetSize.h = max(recommendedTex0Size.h, recommendedTex1Size.h);
 
+	}
+	void beginFrame(){
+		timing = ovrHmd_BeginFrame(getDevice(), 0);
+	}
+	void endFrame(){
+		ovrHmd_EndFrame(getDevice(), getEyeRenderPose(), &getEyeTexture()[0].Texture);
+	}
+	void getEyePoses(){
+		ovrVector3f hmdToEyeViewOffset[2] = {getEyeRenderDesc()[0].HmdToEyeViewOffset, getEyeRenderDesc()[1].HmdToEyeViewOffset };
+		ovrHmd_GetEyePoses(getDevice(), 0, hmdToEyeViewOffset, eyeRenderPose, NULL);
+	}
+	ovrPosef* getEyeRenderPose(){
+		return eyeRenderPose;
+	}
+	ovrFrameTiming getTiming(){
+		return timing;
 	}
 	ovrHmd getDevice() {
 		return hmd;
@@ -66,7 +85,7 @@ public:
 		ovrHmd_Destroy(hmd);
 		ovr_Shutdown();
 	}
-	void createEyeTextures(GLuint& texture){
+	void createEyeTextures(const GLuint& texture){
 		// ovrFovPort eyeFov[2] = { hmd->getDevice()->DefaultEyeFov[0], hmd->getDevice()->DefaultEyeFov[1] }; //TODO:Rustam Why this work and other does not
 
 		eyeFov[0] = hmd->DefaultEyeFov[0];

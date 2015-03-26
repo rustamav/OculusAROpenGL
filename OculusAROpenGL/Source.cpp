@@ -8,11 +8,11 @@
 
 #include "HMD.cpp"
 #include "CAMERA.cpp"
+#include "WindowHandler.cpp"
 
 #include <thread>
 #include <chrono>  
-#include "SDL.h"
-#include "SDL_syswm.h"
+
 
 
 
@@ -24,63 +24,64 @@ void generateTexture(GLuint texture, unsigned char* data);
 using namespace OVR;
 
 
-SDL_Window *window;
 
-SDL_GLContext context;
-
+GLuint frameBuffer;
+GLuint renderBuffer;
+GLuint texture;
 
 GLuint vertexArray;
 GLuint positionBuffer;
 GLuint uvbuffer;
 GLuint program;
-GLuint frameBuffer;
-GLuint texture;
-GLuint renderBuffer;
+
+
 
 GLuint textureCam;
 
 unsigned char* data[2];
 unsigned char jpgimage[100000];
-ovrFrameTiming ovrTiming;
-
-
-
 HMD* hmd;
 CAMERA* camera;
 
+
+
+
+WindowHandler windowHandler;
 int main(int argc, char *argv[])
 {
-	SDL_Init(SDL_INIT_VIDEO);
-
-	int x = SDL_WINDOWPOS_CENTERED;
-	int y = SDL_WINDOWPOS_CENTERED;
 	
+	windowHandler.init();
 	Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN;
 
 	bool debug = false;
 
-	ovr_Initialize();
 	hmd = new HMD(debug, flags);
 
 	camera = new CAMERA(hmd, debug);
 		
 	if (debug == false && hmd->getDevice()->HmdCaps & ovrHmdCap_ExtendDesktop)
 	{
-		x = hmd->getDevice()->WindowsPos.x;
-		y = hmd->getDevice()->WindowsPos.y;
+		windowHandler.setX(hmd->getDevice()->WindowsPos.x);
+		windowHandler.setY(hmd->getDevice()->WindowsPos.y);
 		flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 	}
-	window = SDL_CreateWindow("Oculus Rift SDL2 OpenGL Demo", x, y, hmd->getResolution().w, hmd->getResolution().h, flags);
+	
 
-	context = SDL_GL_CreateContext(window);
+	windowHandler.createWindow(hmd, flags);
 
+	windowHandler.createContext();
+
+	
+	
+	//render = new RENDER(hmd, windowHandler.getWindowP(),windowHandler.getContext());
 	glewExperimental = GL_TRUE;
 
 	glewInit();
-	
+
 	glGenFramebuffers(1, &frameBuffer);
 
 	glGenTextures(1, &texture);
+	//glGenTextures(1, &textureCam);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
 	glBindTexture(GL_TEXTURE_2D, texture);
@@ -100,9 +101,9 @@ int main(int argc, char *argv[])
 		glDeleteTextures(1, &texture);
 		glDeleteRenderbuffers(1, &renderBuffer);
 
-		SDL_GL_DeleteContext(context);
+		SDL_GL_DeleteContext(windowHandler.getContext());
 
-		SDL_DestroyWindow(window);
+		SDL_DestroyWindow(windowHandler.getWindowP());
 
 		ovrHmd_Destroy(hmd->getDevice());
 
@@ -110,20 +111,13 @@ int main(int argc, char *argv[])
 
 		SDL_Quit();
 
-		return 0;
+		printf("*** ERROR *** Could not create OpenGL buffers");
 	}
 
 
 	hmd->createEyeTextures(texture);
-	
 
-	SDL_SysWMinfo info;
-
-	SDL_VERSION(&info.version);
-
-	SDL_GetWindowWMInfo(window, &info);
-
-	hmd->configureWindow(info);
+	hmd->configureWindow(windowHandler.getInfo());
 	
 	program = LoadShaders("Vertex2.shader", "Fragment2.shader");
 	glLinkProgram(program);
@@ -234,23 +228,20 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		ovrTiming = ovrHmd_BeginFrame(hmd->getDevice(), 0);
-		float curDelta = ovrTiming.DeltaSeconds;
+		hmd->beginFrame();
+		
+		float curDelta = hmd->getTiming().DeltaSeconds;
 		
 		while (curDelta < 0.016666) 
 		{
 			Sleep(1);
-			ovrTiming = ovrHmd_BeginFrame(hmd->getDevice(), 0);
-			curDelta += ovrTiming.DeltaSeconds;
+			hmd->beginFrame();
+			curDelta += hmd->getTiming().DeltaSeconds;
 		}
 		
 		//printf("Time since last frame %2.8f\n", 1/curDelta);
-
-		ovrVector3f hmdToEyeViewOffset[2] = { hmd->getEyeRenderDesc()[0].HmdToEyeViewOffset, hmd->getEyeRenderDesc()[1].HmdToEyeViewOffset };
-
-		ovrPosef eyeRenderPose[2];
-
-		ovrHmd_GetEyePoses(hmd->getDevice(), 0, hmdToEyeViewOffset, eyeRenderPose, NULL);
+		hmd->getEyePoses();
+		
 
 		glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
 
@@ -266,7 +257,7 @@ int main(int argc, char *argv[])
 		for (int eyeIndex = 0; eyeIndex < ovrEye_Count; eyeIndex++)
 		{
 			ovrEyeType eye = hmd->getDevice()->EyeRenderOrder[eyeIndex];
-			//glGenTextures(1, &textureCam); //TODO:Rustam This was causing memor drain
+			//glGenTextures(1, &textureCam); //TODO:Rustam This was causing memory drain. WORKS WITHOUR glGenTextures???
 			// "Bind" the newly created texture : all future texture functions will modify this texture
 			glBindTexture(GL_TEXTURE_2D, textureCam);
 
@@ -285,8 +276,8 @@ int main(int argc, char *argv[])
 			// Use our shader
 			glUseProgram(program);
 			// Bind our texture in Texture Unit 0
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, textureCam);
+			glActiveTexture(GL_TEXTURE0); //TODO:Rustam what are these lines doing?
+		    glBindTexture(GL_TEXTURE_2D, textureCam);
 			// Set our "myTextureSampler" sampler to user Texture Unit 0
 			glUniform1i(TextureID, 0);
 			// ================= CREATE TEXTURE ===========
@@ -303,8 +294,8 @@ int main(int argc, char *argv[])
 		}
 
 		glBindVertexArray(0);
-
-		ovrHmd_EndFrame(hmd->getDevice(), eyeRenderPose, &hmd->getEyeTexture()[0].Texture);
+		//hmd->endFrame();
+		ovrHmd_EndFrame(hmd->getDevice(), hmd->getEyeRenderPose(), &hmd->getEyeTexture()[0].Texture);
 
 		glBindVertexArray(vertexArray);
 	}
@@ -327,14 +318,13 @@ void cleanup() {
 	glDeleteTextures(1, &textureCam);
 	glDeleteRenderbuffers(1, &renderBuffer);
 
-	SDL_GL_DeleteContext(context);
-
-	SDL_DestroyWindow(window);
-
+	
+	windowHandler.cleanup();
 	hmd->cleanup();
 	//camera->cleanup();
 	
-	SDL_Quit();
+	windowHandler.quit();
+	
 }
 void generateTexture(GLuint texture, unsigned char *data)
 {
@@ -447,3 +437,4 @@ GLuint LoadShaders(const char * vertex_file_path, const char * fragment_file_pat
 
 	return ProgramID;
 }
+
