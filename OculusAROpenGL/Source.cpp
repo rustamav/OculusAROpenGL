@@ -13,11 +13,13 @@
 #include <thread>
 #include <chrono>  
 
+//TEXT2D
+#include "headers/text2Dv2.hpp"
+#include "headers/texture.hpp"
+#include "headers/shader.hpp"
 
 
-
-
-GLuint LoadShaders(const char * vertex_file_path, const char * fragment_file_path);
+//GLuint LoadShaders(const char * vertex_file_path, const char * fragment_file_path);
 void cleanup();
 void generateTexture(GLuint texture, unsigned char* data);
 
@@ -42,14 +44,14 @@ unsigned char* data[2];
 unsigned char jpgimage[100000];
 HMD* hmd;
 CAMERA* camera;
-
+Text2D text2d;
 
 
 
 WindowHandler windowHandler;
 int main(int argc, char *argv[])
 {
-	
+
 	windowHandler.init();
 	Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN;
 
@@ -177,14 +179,20 @@ int main(int argc, char *argv[])
 	glVertexAttribPointer(uvlocation, 2, GL_FLOAT, GL_FALSE, 0, 0);
 	glEnableVertexAttribArray(uvlocation);
 
-	glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClearDepth(1.0f);
 
 	glDepthFunc(GL_LEQUAL);
 	glEnable(GL_DEPTH_TEST);
 
 	bool running = true;
-
+	int a = 0;
+	// Initialize our little text library with the Holstein font
+	text2d.initText2D("Holstein.DDS");
+	//TEXT2D
+	char text[256];
+	float min_fps = 1000;
+	float max_fps = -1000;
 	while (running == true)
 	{
 		SDL_Event event;
@@ -232,6 +240,8 @@ int main(int argc, char *argv[])
 		
 		float curDelta = hmd->getTiming().DeltaSeconds;
 		
+		//TODO:Abdykerim
+		//test fps and find the best fps rate
 		while (curDelta < 0.016666) 
 		{
 			Sleep(1);
@@ -239,6 +249,9 @@ int main(int argc, char *argv[])
 			curDelta += hmd->getTiming().DeltaSeconds;
 		}
 		
+
+		if (max_fps < (1 / curDelta)) max_fps = (1 / curDelta);
+		if (min_fps >(1 / curDelta)) min_fps = (1 / curDelta);
 		//printf("Time since last frame %2.8f\n", 1/curDelta);
 		hmd->getEyePoses();
 		
@@ -253,7 +266,10 @@ int main(int argc, char *argv[])
 		camera->getDevice()->PreStoreCamData();	//renderer
 		data[OVR::OV_CAMEYE_LEFT] = camera->getCamImageLeft();
 		data[OVR::OV_CAMEYE_RIGHT] = camera->getCamImageRight();
-				
+		
+		//TEXT2D
+		std::sprintf(text, "%.2f", 1 / curDelta);
+
 		for (int eyeIndex = 0; eyeIndex < ovrEye_Count; eyeIndex++)
 		{
 			ovrEyeType eye = hmd->getDevice()->EyeRenderOrder[eyeIndex];
@@ -284,13 +300,37 @@ int main(int argc, char *argv[])
 
 			// MVPMatrix = Matrix4f(ovrMatrix4f_Projection(eyeRenderDesc[eye].Fov, 0.01f, 10000.0f, true)) * Matrix4f(Quatf(eyeRenderPose[eye].Orientation).Inverted()) * Matrix4f::Translation(-Vector3f(eyeRenderPose[eye].Position));
 
-			Matrix4f MVPMatrix = OVR::Matrix4f::Identity();
-
+			//translate a bit behind for text, etc.
+			Matrix4f MVPMatrix = OVR::Matrix4f::Scaling(0.75)*OVR::Matrix4f::Translation(0, 0, 1.00001) ; //MVPMatrix = OVR::Matrix4f::Identity();
+			
 			glUniformMatrix4fv(MVPMatrixLocation, 1, GL_FALSE, &MVPMatrix.Transposed().M[0][0]);
 
 			glViewport(hmd->getEyeRenderViewport()[eye].Pos.x, hmd->getEyeRenderViewport()[eye].Pos.y, hmd->getEyeRenderViewport()[eye].Size.w, hmd->getEyeRenderViewport()[eye].Size.h);
 
+			// 1rst attribute buffer : vertices
+			glEnableVertexAttribArray(positionLocation);
+			glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
+			glVertexAttribPointer(positionLocation, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+
+			// 2nd attribute buffer : UVs
+			glEnableVertexAttribArray(uvlocation);
+			glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
+			glVertexAttribPointer(uvlocation, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
+
 			glDrawArrays(GL_TRIANGLES, 0, 6);
+
+			glDisableVertexAttribArray(uvlocation);
+			glDisableVertexAttribArray(positionLocation);
+
+			if (eyeIndex == 1){
+				text2d.printText2D(text, 150, 150, 30);
+				//std::sprintf(text, "Rustam");
+				//text2d.printText2D(text, 400, 400, 50);
+				std::sprintf(text, "%.2f", min_fps);
+				text2d.printText2D(text, 150, 450, 25);
+				std::sprintf(text, "%.2f", max_fps);
+				text2d.printText2D(text, 150, 375, 25);
+			}
 		}
 
 		glBindVertexArray(0);
@@ -308,6 +348,9 @@ void cleanup() {
 	glDeleteVertexArrays(1, &vertexArray);
 	glDeleteBuffers(1, &positionBuffer);
 	glDeleteBuffers(1, &uvbuffer);
+	
+	//TEXT2d
+	text2d.cleanupText2D();
 
 	//glDeleteShader(vertexShader);
 	//glDeleteShader(fragmentShader);
@@ -344,97 +387,3 @@ void generateTexture(GLuint texture, unsigned char *data)
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glGenerateMipmap(GL_TEXTURE_2D);
 } //TODO:Rustam pass texture by reference and it should work
-GLuint LoadShaders(const char * vertex_file_path, const char * fragment_file_path){
-
-	// Create the shaders
-	GLuint VertexShaderID = glCreateShader(GL_VERTEX_SHADER);
-	GLuint FragmentShaderID = glCreateShader(GL_FRAGMENT_SHADER);
-
-	// Read the Vertex Shader code from the file
-	std::string VertexShaderCode;
-	std::ifstream VertexShaderStream(vertex_file_path, std::ios::in);
-	if (VertexShaderStream.is_open()){
-		std::string Line = "";
-		while (getline(VertexShaderStream, Line))
-			VertexShaderCode += "\n" + Line;
-		VertexShaderStream.close();
-	}
-	else{
-		printf("Impossible to open %s. Are you in the right directory ? Don't forget to read the FAQ !\n", vertex_file_path);
-		getchar();
-		return 0;
-	}
-
-	// Read the Fragment Shader code from the file
-	std::string FragmentShaderCode;
-	std::ifstream FragmentShaderStream(fragment_file_path, std::ios::in);
-	if (FragmentShaderStream.is_open()){
-		std::string Line = "";
-		while (getline(FragmentShaderStream, Line))
-			FragmentShaderCode += "\n" + Line;
-		FragmentShaderStream.close();
-	}
-
-
-
-	GLint Result = GL_FALSE;
-	int InfoLogLength;
-
-
-
-	// Compile Vertex Shader
-	printf("Compiling shader : %s\n", vertex_file_path);
-	char const * VertexSourcePointer = VertexShaderCode.c_str();
-	glShaderSource(VertexShaderID, 1, &VertexSourcePointer, NULL);
-	glCompileShader(VertexShaderID);
-
-	// Check Vertex Shader
-	glGetShaderiv(VertexShaderID, GL_COMPILE_STATUS, &Result);
-	glGetShaderiv(VertexShaderID, GL_INFO_LOG_LENGTH, &InfoLogLength);
-	if (InfoLogLength > 0){
-		std::vector<char> VertexShaderErrorMessage(InfoLogLength + 1);
-		glGetShaderInfoLog(VertexShaderID, InfoLogLength, NULL, &VertexShaderErrorMessage[0]);
-		printf("%s\n", &VertexShaderErrorMessage[0]);
-	}
-
-
-
-	// Compile Fragment Shader
-	printf("Compiling shader : %s\n", fragment_file_path);
-	char const * FragmentSourcePointer = FragmentShaderCode.c_str();
-	glShaderSource(FragmentShaderID, 1, &FragmentSourcePointer, NULL);
-	glCompileShader(FragmentShaderID);
-
-	// Check Fragment Shader
-	glGetShaderiv(FragmentShaderID, GL_COMPILE_STATUS, &Result);
-	glGetShaderiv(FragmentShaderID, GL_INFO_LOG_LENGTH, &InfoLogLength);
-	if (InfoLogLength > 0){
-		std::vector<char> FragmentShaderErrorMessage(InfoLogLength + 1);
-		glGetShaderInfoLog(FragmentShaderID, InfoLogLength, NULL, &FragmentShaderErrorMessage[0]);
-		printf("%s\n", &FragmentShaderErrorMessage[0]);
-	}
-
-
-
-	// Link the program
-	printf("Linking program\n");
-	GLuint ProgramID = glCreateProgram();
-	glAttachShader(ProgramID, VertexShaderID);
-	glAttachShader(ProgramID, FragmentShaderID);
-	glLinkProgram(ProgramID);
-
-	// Check the program
-	glGetProgramiv(ProgramID, GL_LINK_STATUS, &Result);
-	glGetProgramiv(ProgramID, GL_INFO_LOG_LENGTH, &InfoLogLength);
-	if (InfoLogLength > 0){
-		std::vector<char> ProgramErrorMessage(InfoLogLength + 1);
-		glGetProgramInfoLog(ProgramID, InfoLogLength, NULL, &ProgramErrorMessage[0]);
-		printf("%s\n", &ProgramErrorMessage[0]);
-	}
-
-	glDeleteShader(VertexShaderID);
-	glDeleteShader(FragmentShaderID);
-
-	return ProgramID;
-}
-
